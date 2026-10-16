@@ -13,6 +13,17 @@ const OPPOSITE = { left: 'right', right: 'left', up: 'down', down: 'up' };
 const PACMAN_SPEED = 0.125; // 1/8 celda/frame -> alinea cada 8 frames
 const GHOST_SPEED = 0.1;    // 1/10 celda/frame
 
+// Geometria de la pen: interior filas 13-15; se sale por la columna 13
+// (la puerta esta en (13-14,12)) hasta la fila 11, sobre la puerta.
+const PEN_TOP = 13;
+const PEN_BOTTOM = 15;
+const PEN_DOOR_X = 13;
+const PEN_EXIT_Y = 11;
+
+// Retardo de salida de la pen en frames (~60 fps): pinky 0 s, inky 3 s,
+// clyde 6 s. blinky no aparece: nace fuera de la pen, directo a chase.
+const RELEASE_FRAMES = { pinky: 0, inky: 180, clyde: 360 };
+
 // Crea una partida nueva. Copia MAZE (pristino) a game.grid para poder comer
 // dots sin destruir el original, y reiniciar.
 function createGame() {
@@ -42,6 +53,9 @@ function createGame() {
       dir: 'up',
       speed: GHOST_SPEED,
       kind: g.kind,
+      corner: g.corner,
+      mode: g.kind === 'blinky' ? 'chase' : 'pen', // blinky nace fuera de la pen
+      releaseAt: RELEASE_FRAMES[ g.kind ] || 0,
     } ) ),
   };
 }
@@ -141,9 +155,54 @@ function decideGhost( game, g ) {
   }
 }
 
+// Pen: rebote vertical entre PEN_TOP y PEN_BOTTOM descontando releaseAt
+// (1 por update); al llegar a 0 pasa a 'exit'.
+function movePenGhost( g ) {
+  if ( g.releaseAt > 0 ) g.releaseAt -= 1;
+  if ( g.releaseAt <= 0 ) {
+    g.mode = 'exit';
+    return;
+  }
+  if ( aligned( g.y ) ) {
+    g.y = Math.round( g.y );
+    if ( g.y <= PEN_TOP ) g.dir = 'down';
+    else if ( g.y >= PEN_BOTTOM ) g.dir = 'up';
+  }
+  g.y += DIRS[ g.dir ].y * g.speed;
+}
+
+// Salida scripteada por la puerta: primero a la columna 13, luego sube en
+// linea recta hasta (13,11) y pasa a 'chase'.
+function moveExitGhost( g ) {
+  if ( aligned( g.x ) ) g.x = Math.round( g.x );
+  if ( g.x !== PEN_DOOR_X ) {
+    g.dir = g.x < PEN_DOOR_X ? 'right' : 'left';
+    g.x += DIRS[ g.dir ].x * g.speed;
+    return;
+  }
+  if ( aligned( g.y ) ) {
+    g.y = Math.round( g.y );
+    if ( g.y <= PEN_EXIT_Y ) {
+      g.mode = 'chase';
+      return;
+    }
+    g.dir = 'up';
+  }
+  g.y -= g.speed;
+}
+
 function moveGhost( game, g ) {
   const grid = game.grid;
   const width = grid[ 0 ].length;
+
+  if ( g.mode === 'pen' ) {
+    movePenGhost( g );
+    return;
+  }
+  if ( g.mode === 'exit' ) {
+    moveExitGhost( g );
+    return;
+  }
 
   if ( aligned( g.x ) && aligned( g.y ) ) {
     g.x = Math.round( g.x );
