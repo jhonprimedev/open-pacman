@@ -65,14 +65,16 @@ function aligned( v ) {
 }
 
 // Una celda es muro para el actor dado?
-//   pacman: bloqueado por pared (1) y puerta (3)
-//   ghost:  bloqueado solo por pared (1)
+//   Pared (1) y puerta (3) bloquean a todos los actores; la puerta es
+//   unidireccional: solo se cruza scriptada en el ritual de salida, que
+//   mueve sin consultar isWall. El parametro actor se conserva para un
+//   futuro modo frightened.
 function isWall( grid, x, y, actor ) {
   if ( y < 0 || y >= grid.length ) return true;
   if ( x < 0 || x >= grid[ 0 ].length ) return true;
   const v = grid[ y ][ x ];
   if ( v === 1 ) return true;
-  if ( v === 3 && actor === 'pacman' ) return true;
+  if ( v === 3 ) return true;
   return false;
 }
 
