@@ -13,6 +13,17 @@ const OPPOSITE = { left: 'right', right: 'left', up: 'down', down: 'up' };
 const PACMAN_SPEED = 0.125; // 1/8 celda/frame -> alinea cada 8 frames
 const GHOST_SPEED = 0.1;    // 1/10 celda/frame
 
+// Geometria de la pen: interior filas 13-15; se sale por la columna 13
+// (la puerta esta en (13-14,12)) hasta la fila 11, sobre la puerta.
+const PEN_TOP = 13;
+const PEN_BOTTOM = 15;
+const PEN_DOOR_X = 13;
+const PEN_EXIT_Y = 11;
+
+// Retardo de salida de la pen en frames (~60 fps): pinky 0 s, inky 3 s,
+// clyde 6 s. blinky no aparece: nace fuera de la pen, directo a chase.
+const RELEASE_FRAMES = { pinky: 0, inky: 180, clyde: 360 };
+
 // Crea una partida nueva. Copia MAZE (pristino) a game.grid para poder comer
 // dots sin destruir el original, y reiniciar.
 function createGame() {
@@ -42,6 +53,9 @@ function createGame() {
       dir: 'up',
       speed: GHOST_SPEED,
       kind: g.kind,
+      corner: g.corner,
+      mode: g.kind === 'blinky' ? 'chase' : 'pen', // blinky nace fuera de la pen
+      releaseAt: RELEASE_FRAMES[ g.kind ] || 0,
     } ) ),
   };
 }
@@ -110,40 +124,108 @@ function movePacman( game ) {
   wrapTunnel( p, width );
 }
 
+// Blanco de cada personalidad. Puede caer fuera del laberinto: es solo una
+// coordenada de distancia, nunca una celda que se pisa.
+function ghostTarget( game, g ) {
+  const p = game.pacman;
+  const px = Math.round( p.x );
+  const py = Math.round( p.y );
+  const d = DIRS[ p.dir ];
+
+  if ( g.kind === 'blinky' ) return { x: px, y: py }; // persecucion directa
+  if ( g.kind === 'pinky' ) {
+    return { x: px + d.x * 4, y: py + d.y * 4 }; // embosca 4 celdas delante
+  }
+  if ( g.kind === 'inky' ) {
+    const b = game.ghosts.find( ( o ) => o.kind === 'blinky' );
+    const bx = Math.round( b.x );
+    const by = Math.round( b.y );
+    // 2 celdas delante de Pac-Man, dobladas desde blinky (flanqueo).
+    return { x: 2 * ( px + d.x * 2 ) - bx, y: 2 * ( py + d.y * 2 ) - by };
+  }
+  // clyde: persigue lejos, se retira a su esquina a 8 o menos.
+  const dist = Math.abs( g.x - px ) + Math.abs( g.y - py );
+  if ( dist > 8 ) return { x: px, y: py };
+  return g.corner;
+}
+
+// Prioridad clasica de desempate a igual distancia: arriba > izquierda > abajo > derecha.
+const DIR_PRIORITY = [ 'up', 'left', 'down', 'right' ];
+
 function decideGhost( game, g ) {
   const grid = game.grid;
-  const p = game.pacman;
+  const target = ghostTarget( game, g );
 
-  const options = Object.keys( DIRS ).filter(
+  const options = DIR_PRIORITY.filter(
     ( dir ) => dir !== OPPOSITE[ g.dir ] && canMove( grid, g.x, g.y, dir, 'ghost' )
   );
   // Sin salida (callejon): permitir el giro de 180.
   const choices = options.length ? options : [ '' + OPPOSITE[ g.dir ] ];
 
-  if ( g.kind === 'hunter' ) {
-    const px = Math.round( p.x );
-    const py = Math.round( p.y );
-    let best = choices[ 0 ];
-    let bestDist = Infinity;
-    for ( const dir of choices ) {
-      const d = DIRS[ dir ];
-      const nx = g.x + d.x;
-      const ny = g.y + d.y;
-      const dist = Math.abs( nx - px ) + Math.abs( ny - py );
-      if ( dist < bestDist ) {
-        bestDist = dist;
-        best = dir;
-      }
+  // Direccion que minimiza la distancia Manhattan al blanco; al iterar en
+  // orden de DIR_PRIORITY, el primero hallado desempata (criterio clasico).
+  let best = choices[ 0 ];
+  let bestDist = Infinity;
+  for ( const dir of choices ) {
+    const d = DIRS[ dir ];
+    const dist =
+      Math.abs( g.x + d.x - target.x ) + Math.abs( g.y + d.y - target.y );
+    if ( dist < bestDist ) {
+      bestDist = dist;
+      best = dir;
     }
-    g.dir = best;
-  } else {
-    g.dir = choices[ Math.floor( Math.random() * choices.length ) ];
   }
+  g.dir = best;
+}
+
+// Pen: rebote vertical entre PEN_TOP y PEN_BOTTOM descontando releaseAt
+// (1 por update); al llegar a 0 pasa a 'exit'.
+function movePenGhost( g ) {
+  if ( g.releaseAt > 0 ) g.releaseAt -= 1;
+  if ( g.releaseAt <= 0 ) {
+    g.mode = 'exit';
+    return;
+  }
+  if ( aligned( g.y ) ) {
+    g.y = Math.round( g.y );
+    if ( g.y <= PEN_TOP ) g.dir = 'down';
+    else if ( g.y >= PEN_BOTTOM ) g.dir = 'up';
+  }
+  g.y += DIRS[ g.dir ].y * g.speed;
+}
+
+// Salida scripteada por la puerta: primero a la columna 13, luego sube en
+// linea recta hasta (13,11) y pasa a 'chase'.
+function moveExitGhost( g ) {
+  if ( aligned( g.x ) ) g.x = Math.round( g.x );
+  if ( g.x !== PEN_DOOR_X ) {
+    g.dir = g.x < PEN_DOOR_X ? 'right' : 'left';
+    g.x += DIRS[ g.dir ].x * g.speed;
+    return;
+  }
+  if ( aligned( g.y ) ) {
+    g.y = Math.round( g.y );
+    if ( g.y <= PEN_EXIT_Y ) {
+      g.mode = 'chase';
+      return;
+    }
+    g.dir = 'up';
+  }
+  g.y -= g.speed;
 }
 
 function moveGhost( game, g ) {
   const grid = game.grid;
   const width = grid[ 0 ].length;
+
+  if ( g.mode === 'pen' ) {
+    movePenGhost( g );
+    return;
+  }
+  if ( g.mode === 'exit' ) {
+    moveExitGhost( g );
+    return;
+  }
 
   if ( aligned( g.x ) && aligned( g.y ) ) {
     g.x = Math.round( g.x );
@@ -165,9 +247,14 @@ function resetPositions( game ) {
   p.dir = 'left';
   p.nextDir = null;
   game.ghosts.forEach( ( g, i ) => {
-    g.x = GHOST_STARTS[ i ].x;
-    g.y = GHOST_STARTS[ i ].y;
+    const s = GHOST_STARTS[ i ];
+    g.x = s.x;
+    g.y = s.y;
     g.dir = 'up';
+    // Ritual de salida original: blinky nace fuera (chase); el resto rebota
+    // en la pen hasta agotar su releaseAt (salida escalonada).
+    g.mode = s.kind === 'blinky' ? 'chase' : 'pen';
+    g.releaseAt = RELEASE_FRAMES[ s.kind ] || 0;
   } );
 }
 
