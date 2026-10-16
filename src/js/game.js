@@ -124,35 +124,58 @@ function movePacman( game ) {
   wrapTunnel( p, width );
 }
 
+// Blanco de cada personalidad. Puede caer fuera del laberinto: es solo una
+// coordenada de distancia, nunca una celda que se pisa.
+function ghostTarget( game, g ) {
+  const p = game.pacman;
+  const px = Math.round( p.x );
+  const py = Math.round( p.y );
+  const d = DIRS[ p.dir ];
+
+  if ( g.kind === 'blinky' ) return { x: px, y: py }; // persecucion directa
+  if ( g.kind === 'pinky' ) {
+    return { x: px + d.x * 4, y: py + d.y * 4 }; // embosca 4 celdas delante
+  }
+  if ( g.kind === 'inky' ) {
+    const b = game.ghosts.find( ( o ) => o.kind === 'blinky' );
+    const bx = Math.round( b.x );
+    const by = Math.round( b.y );
+    // 2 celdas delante de Pac-Man, dobladas desde blinky (flanqueo).
+    return { x: 2 * ( px + d.x * 2 ) - bx, y: 2 * ( py + d.y * 2 ) - by };
+  }
+  // clyde: persigue lejos, se retira a su esquina a 8 o menos.
+  const dist = Math.abs( g.x - px ) + Math.abs( g.y - py );
+  if ( dist > 8 ) return { x: px, y: py };
+  return g.corner;
+}
+
+// Prioridad clasica de desempate a igual distancia: arriba > izquierda > abajo > derecha.
+const DIR_PRIORITY = [ 'up', 'left', 'down', 'right' ];
+
 function decideGhost( game, g ) {
   const grid = game.grid;
-  const p = game.pacman;
+  const target = ghostTarget( game, g );
 
-  const options = Object.keys( DIRS ).filter(
+  const options = DIR_PRIORITY.filter(
     ( dir ) => dir !== OPPOSITE[ g.dir ] && canMove( grid, g.x, g.y, dir, 'ghost' )
   );
   // Sin salida (callejon): permitir el giro de 180.
   const choices = options.length ? options : [ '' + OPPOSITE[ g.dir ] ];
 
-  if ( g.kind === 'hunter' ) {
-    const px = Math.round( p.x );
-    const py = Math.round( p.y );
-    let best = choices[ 0 ];
-    let bestDist = Infinity;
-    for ( const dir of choices ) {
-      const d = DIRS[ dir ];
-      const nx = g.x + d.x;
-      const ny = g.y + d.y;
-      const dist = Math.abs( nx - px ) + Math.abs( ny - py );
-      if ( dist < bestDist ) {
-        bestDist = dist;
-        best = dir;
-      }
+  // Direccion que minimiza la distancia Manhattan al blanco; al iterar en
+  // orden de DIR_PRIORITY, el primero hallado desempata (criterio clasico).
+  let best = choices[ 0 ];
+  let bestDist = Infinity;
+  for ( const dir of choices ) {
+    const d = DIRS[ dir ];
+    const dist =
+      Math.abs( g.x + d.x - target.x ) + Math.abs( g.y + d.y - target.y );
+    if ( dist < bestDist ) {
+      bestDist = dist;
+      best = dir;
     }
-    g.dir = best;
-  } else {
-    g.dir = choices[ Math.floor( Math.random() * choices.length ) ];
   }
+  g.dir = best;
 }
 
 // Pen: rebote vertical entre PEN_TOP y PEN_BOTTOM descontando releaseAt
