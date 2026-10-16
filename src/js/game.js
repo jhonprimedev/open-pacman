@@ -247,9 +247,14 @@ function resetPositions( game ) {
   p.dir = 'left';
   p.nextDir = null;
   game.ghosts.forEach( ( g, i ) => {
-    g.x = GHOST_STARTS[ i ].x;
-    g.y = GHOST_STARTS[ i ].y;
+    const s = GHOST_STARTS[ i ];
+    g.x = s.x;
+    g.y = s.y;
     g.dir = 'up';
+    // Ritual de salida original: blinky nace fuera (chase); el resto rebota
+    // en la pen hasta agotar su releaseAt (salida escalonada).
+    g.mode = s.kind === 'blinky' ? 'chase' : 'pen';
+    g.releaseAt = RELEASE_FRAMES[ s.kind ] || 0;
   } );
 }
 
