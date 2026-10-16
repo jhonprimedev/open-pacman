@@ -51,9 +51,12 @@ const MAZE = MAZE_STR.map( ( row ) => row.split( '' ).map( parseTile ) );
 
 const TUNNEL_ROW = 14;
 const PACMAN_START = { x: 13, y: 23 };
+// corner es solo un blanco de distancia (puede caer fuera del laberinto).
 const GHOST_STARTS = [
-  { x: 13, y: 14, kind: 'hunter' }, // dentro de la pen
-  { x: 14, y: 14, kind: 'random' }, // dentro de la pen
+  { x: 13, y: 11, kind: 'blinky', corner: { x: 25, y: -3 } }, // sobre la puerta
+  { x: 13, y: 14, kind: 'pinky',  corner: { x: 2,  y: -3 } }, // pen, centro
+  { x: 11, y: 14, kind: 'inky',   corner: { x: 27, y: 31 } }, // pen, izquierda
+  { x: 16, y: 14, kind: 'clyde',  corner: { x: 0,  y: 31 } }, // pen, derecha
 ];
 
 window.MAZE = MAZE;
